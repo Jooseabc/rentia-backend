@@ -11,12 +11,16 @@ export function addMonthsISO(isoDate, months) {
 }
 
 export function currentCycleIndex(entryISO, refDate = new Date()) {
-  const entry = new Date(entryISO + 'T00:00:00');
+  const [eYear, eMonth, eDay] = entryISO.split('-').map(Number);
   const today = new Date(refDate);
-  today.setHours(0, 0, 0, 0);
-  let m = (today.getFullYear() - entry.getFullYear()) * 12 + (today.getMonth() - entry.getMonth());
-  if (today.getDate() < entry.getDate()) m--;
-  return Math.max(0, m);
+  const tYear = today.getUTCFullYear();
+  const tMonth = today.getUTCMonth() + 1;
+  const tDay = today.getUTCDate();
+
+  let months = (tYear - eYear) * 12 + (tMonth - eMonth);
+  if (tDay < eDay) months--;
+
+  return Math.max(0, months);
 }
 
 export function getCycles(entryISO, refDate = new Date()) {

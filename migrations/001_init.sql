@@ -1,6 +1,6 @@
 -- =========================================================
 -- SAA - Sistema Automatizado de Alquileres
--- Esquema inicial de base de datos
+-- Esquema inicial de base de datos (v2 - sin CITEXT)
 -- =========================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -8,7 +8,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ===== USUARIOS =====
 CREATE TABLE IF NOT EXISTS users (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email         CITEXT UNIQUE NOT NULL,
+  email         TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   name          TEXT NOT NULL,
   role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin','user')),
@@ -16,14 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- CITEXT puede no estar habilitado; usamos TEXT con índice ci como fallback
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname='citext') THEN
-    ALTER TABLE users ALTER COLUMN email TYPE TEXT;
-    CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users (LOWER(email));
-  END IF;
-END$$;
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower ON users (LOWER(email));
 
 -- ===== PROPIEDADES =====
 CREATE TABLE IF NOT EXISTS properties (
@@ -71,31 +64,31 @@ CREATE TABLE IF NOT EXISTS tenants (
 CREATE INDEX IF NOT EXISTS tenants_unit_idx   ON tenants(unit_id);
 CREATE INDEX IF NOT EXISTS tenants_status_idx ON tenants(status);
 
--- ===== AUMENTOS DE RENTA PROGRAMADOS =====
+-- ===== AUMENTOS DE RENTA =====
 CREATE TABLE IF NOT EXISTS rent_changes (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   effective_date DATE NOT NULL,
-  new_rent      NUMERIC(12,2) NOT NULL,
-  reason        TEXT,
-  created_by    UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  new_rent       NUMERIC(12,2) NOT NULL,
+  reason         TEXT,
+  created_by     UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS rent_changes_tenant_idx ON rent_changes(tenant_id, effective_date);
 
 -- ===== PAGOS =====
 CREATE TABLE IF NOT EXISTS payments (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id     UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  period_start  DATE NOT NULL,
-  period_end    DATE NOT NULL,
-  paid_date     DATE NOT NULL,
-  amount        NUMERIC(12,2) NOT NULL,
-  method        TEXT DEFAULT 'Efectivo',
-  notes         TEXT,
-  receipt_no    SERIAL,
-  created_by    UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id    UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  period_start DATE NOT NULL,
+  period_end   DATE NOT NULL,
+  paid_date    DATE NOT NULL,
+  amount       NUMERIC(12,2) NOT NULL,
+  method       TEXT DEFAULT 'Efectivo',
+  notes        TEXT,
+  receipt_no   SERIAL,
+  created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS payments_tenant_idx ON payments(tenant_id);
 CREATE INDEX IF NOT EXISTS payments_period_idx ON payments(period_start);
@@ -113,13 +106,13 @@ CREATE TABLE IF NOT EXISTS incidents (
 );
 CREATE INDEX IF NOT EXISTS incidents_tenant_idx ON incidents(tenant_id);
 
--- ===== LOG DE NOTIFICACIONES (anti-duplicados) =====
+-- ===== NOTIFICACIONES =====
 CREATE TABLE IF NOT EXISTS notifications_log (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id   UUID REFERENCES tenants(id) ON DELETE CASCADE,
-  kind        TEXT NOT NULL,
-  reference   TEXT NOT NULL,
-  sent_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+  kind      TEXT NOT NULL,
+  reference TEXT NOT NULL,
+  sent_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(tenant_id, kind, reference)
 );
 
