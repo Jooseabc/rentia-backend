@@ -1,29 +1,23 @@
-// Lógica de ciclos de pago, compartida entre PDF, notificaciones y resúmenes
 import { query } from './db.js';
 
 export function addMonthsISO(isoDate, months) {
-  const d = new Date(isoDate + 'T00:00:00');
-  const day = d.getDate();
-  const t = new Date(d.getFullYear(), d.getMonth() + months, 1);
-  const last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
-  t.setDate(Math.min(day, last));
-  return t.toISOString().slice(0, 10);
+  const str = typeof isoDate === 'string' ? isoDate.slice(0, 10) : new Date(isoDate).toISOString().slice(0, 10);
+  const [y, m, d] = str.split('-').map(Number);
+  const date = new Date(y, m - 1 + months, 1);
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  date.setDate(Math.min(d, lastDay));
+  return date.toISOString().slice(0, 10);
 }
 
 export function currentCycleIndex(entryISO, refDate = new Date()) {
-  const entryStr = typeof entryISO === 'string'
-    ? entryISO.slice(0, 10)
-    : new Date(entryISO).toISOString().slice(0, 10);
-
-  const [eYear, eMonth, eDay] = entryStr.split('-').map(Number);
+  const str = typeof entryISO === 'string' ? entryISO.slice(0, 10) : new Date(entryISO).toISOString().slice(0, 10);
+  const [eYear, eMonth, eDay] = str.split('-').map(Number);
   const today = new Date(refDate);
-  const tYear = today.getUTCFullYear();
-  const tMonth = today.getUTCMonth() + 1;
-  const tDay = today.getUTCDate();
-
+  const tYear = today.getFullYear();
+  const tMonth = today.getMonth() + 1;
+  const tDay = today.getDate();
   let months = (tYear - eYear) * 12 + (tMonth - eMonth);
   if (tDay < eDay) months--;
-
   return Math.max(0, months);
 }
 
@@ -36,7 +30,6 @@ export function getCycles(entryISO, refDate = new Date()) {
   }));
 }
 
-// Devuelve la renta efectiva en una fecha dada considerando aumentos
 export async function rentAtDate(tenantId, dateISO, defaultRent) {
   const r = await query(
     `SELECT new_rent FROM rent_changes
@@ -47,9 +40,8 @@ export async function rentAtDate(tenantId, dateISO, defaultRent) {
   return r.rows[0] ? Number(r.rows[0].new_rent) : Number(defaultRent || 0);
 }
 
-// Días hasta una fecha dada (negativo si pasó)
 export function daysUntil(isoDate, refDate = new Date()) {
-  const d = new Date(isoDate + 'T00:00:00');
+  const d = new Date(isoDate.slice(0, 10) + 'T00:00:00');
   const t = new Date(refDate);
   t.setHours(0, 0, 0, 0);
   return Math.round((d - t) / (1000 * 60 * 60 * 24));
@@ -64,6 +56,9 @@ export function fmtMoney(n, currency = 'S/') {
 
 export function fmtDate(iso) {
   if (!iso) return '—';
-  const d = typeof iso === 'string' ? new Date(iso + 'T00:00:00') : new Date(iso);
-  return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
+  const str = typeof iso === 'string' ? iso.slice(0, 10) : new Date(iso).toISOString().slice(0, 10);
+  const [y, m, d] = str.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('es-PE', {
+    day: '2-digit', month: 'long', year: 'numeric',
+  });
 }
