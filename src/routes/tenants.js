@@ -330,5 +330,47 @@ router.get('/payments/all', async (_req, res) => {
   items.sort((a, b) => b.cycle.start.localeCompare(a.cycle.start));
   res.json({ items });
 });
+// POST /api/tenants/form-intake — recibe datos desde Google Forms (no requiere auth)
+router.post('/form-intake', async (req, res) => {
+  const secret = req.headers['x-form-secret'];
+  if (secret !== process.env.FORM_SECRET) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  try {
+    const {
+      full_name, dni, phone, email,
+      emergency_contact, emergency_phone,
+      entry_date, monthly_rent, deposit, notes,
+    } = req.body;
 
+    if (!full_name || !entry_date || !monthly_rent) {
+      return res.status(400).json({ error: 'Faltan campos obligatorios: full_name, entry_date, monthly_rent' });
+    }
+
+    const r = await query(
+      `INSERT INTO tenants
+        (full_name, dni, phone, email, emergency_contact, emergency_phone,
+         entry_date, monthly_rent, deposit, status, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10)
+       RETURNING id, full_name`,
+      [
+        full_name.trim(),
+        dni || null,
+        phone || null,
+        email || null,
+        emergency_contact || null,
+        emergency_phone || null,
+        entry_date,
+        Number(monthly_rent),
+        Number(deposit || 0),
+        notes || null,
+      ]
+    );
+    console.log(`[form-intake] Nuevo inquilino: ${r.rows[0].full_name}`);
+    res.json({ ok: true, tenant: r.rows[0] });
+  } catch (err) {
+    console.error('[form-intake] Error:', err.message);
+    res.status(500).json({ error: 'Error al registrar inquilino' });
+  }
+});
 export default router;
