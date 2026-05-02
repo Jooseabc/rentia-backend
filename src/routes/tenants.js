@@ -7,6 +7,62 @@ import { getCycles, rentAtDate, addMonthsISO, daysUntil } from '../lib/cycles.js
 import { generateReceiptPDF } from '../lib/pdf.js';
 
 const router = Router();
+
+// ============================================================
+// RUTAS PUBLICAS (sin autenticacion) - DEBEN IR PRIMERO
+// ============================================================
+
+// POST /api/tenants/form-intake — recibe datos desde Google Forms
+router.post('/form-intake', async (req, res) => {
+  const secret = req.headers['x-form-secret'];
+  console.log('[form-intake] Secret recibido:', JSON.stringify(secret));
+  console.log('[form-intake] Secret esperado: "saa2024"');
+
+  if (secret !== 'saa2024') {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+
+  try {
+    const {
+      full_name, dni, phone, email,
+      emergency_contact, emergency_phone,
+      entry_date, monthly_rent, deposit, notes,
+    } = req.body;
+
+    if (!full_name || !entry_date) {
+      return res.status(400).json({ error: 'Faltan campos obligatorios: full_name, entry_date' });
+    }
+
+    const r = await query(
+      `INSERT INTO tenants
+        (full_name, dni, phone, email, emergency_contact, emergency_phone,
+         entry_date, monthly_rent, deposit, status, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10)
+       RETURNING id, full_name`,
+      [
+        full_name.trim(),
+        dni || null,
+        phone || null,
+        email || null,
+        emergency_contact || null,
+        emergency_phone || null,
+        entry_date,
+        Number(monthly_rent || 0),
+        Number(deposit || 0),
+        notes || null,
+      ]
+    );
+    console.log(`[form-intake] Nuevo inquilino: ${r.rows[0].full_name}`);
+    res.json({ ok: true, tenant: r.rows[0] });
+  } catch (err) {
+    console.error('[form-intake] Error:', err.message);
+    res.status(500).json({ error: 'Error al registrar inquilino' });
+  }
+});
+
+// ============================================================
+// A PARTIR DE AQUI TODAS LAS RUTAS REQUIEREN AUTENTICACION
+// ============================================================
 router.use(requireAuth);
 
 // ============== INQUILINOS ==============
@@ -67,7 +123,6 @@ router.get('/:id', async (req, res) => {
     [tenant.id]
   );
 
-  // Calcular renta efectiva por ciclo
   const cyclesWithRent = await Promise.all(
     cycles.map(async (c) => ({
       ...c,
@@ -152,7 +207,6 @@ router.delete('/payments/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/tenants/payments/:id/receipt - PDF
 router.get('/payments/:id/receipt', async (req, res) => {
   const r = await query(
     `SELECT pay.*,
@@ -224,7 +278,6 @@ router.post('/rent-changes', validate(rentChangeSchema), async (req, res) => {
      VALUES ($1,$2,$3,$4,$5) RETURNING *`,
     [c.tenant_id, c.effective_date, c.new_rent, c.reason || null, req.user.id]
   );
-  // Si el aumento ya está vigente, actualiza monthly_rent
   if (new Date(c.effective_date) <= new Date()) {
     await query('UPDATE tenants SET monthly_rent = $1 WHERE id = $2', [c.new_rent, c.tenant_id]);
   }
@@ -253,7 +306,6 @@ router.get('/dashboard/summary', async (_req, res) => {
     const tp = payments.filter((p) => p.tenant_id === t.id);
     const cur = cycles[cycles.length - 1];
 
-    // Mora = ciclos pasados sin pago
     let unpaidPast = 0;
     for (let i = 0; i < cycles.length - 1; i++) {
       if (!tp.some((p) => p.period_start === cycles[i].start)) unpaidPast++;
@@ -330,49 +382,5 @@ router.get('/payments/all', async (_req, res) => {
   items.sort((a, b) => b.cycle.start.localeCompare(a.cycle.start));
   res.json({ items });
 });
-// POST /api/tenants/form-intake — recibe datos desde Google Forms (no requiere auth)
-router.post('/form-intake', async (req, res) => {
-  const secret = req.headers['x-form-secret'];
-console.log('[form-intake] Secret recibido:', JSON.stringify(secret));
-console.log('[form-intake] Secret esperado:', JSON.stringify(process.env.FORM_SECRET));
-if (secret !== 'saa2024') {
-    return res.status(401).json({ error: 'No autorizado' });
-  }
-  try {
-    const {
-      full_name, dni, phone, email,
-      emergency_contact, emergency_phone,
-      entry_date, monthly_rent, deposit, notes,
-    } = req.body;
 
-    if (!full_name || !entry_date || !monthly_rent) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios: full_name, entry_date, monthly_rent' });
-    }
-
-    const r = await query(
-      `INSERT INTO tenants
-        (full_name, dni, phone, email, emergency_contact, emergency_phone,
-         entry_date, monthly_rent, deposit, status, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10)
-       RETURNING id, full_name`,
-      [
-        full_name.trim(),
-        dni || null,
-        phone || null,
-        email || null,
-        emergency_contact || null,
-        emergency_phone || null,
-        entry_date,
-        Number(monthly_rent),
-        Number(deposit || 0),
-        notes || null,
-      ]
-    );
-    console.log(`[form-intake] Nuevo inquilino: ${r.rows[0].full_name}`);
-    res.json({ ok: true, tenant: r.rows[0] });
-  } catch (err) {
-    console.error('[form-intake] Error:', err.message);
-    res.status(500).json({ error: 'Error al registrar inquilino' });
-  }
-});
 export default router;
