@@ -10,6 +10,7 @@ import { startReminderJob } from './lib/reminders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
+app.set('trust proxy', 1);
 
 // CORS
 const origins = (process.env.CORS_ORIGIN || '*')
