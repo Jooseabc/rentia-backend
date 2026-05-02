@@ -333,6 +333,8 @@ router.get('/payments/all', async (_req, res) => {
 // POST /api/tenants/form-intake — recibe datos desde Google Forms (no requiere auth)
 router.post('/form-intake', async (req, res) => {
   const secret = req.headers['x-form-secret'];
+console.log('[form-intake] Secret recibido:', JSON.stringify(secret));
+console.log('[form-intake] Secret esperado:', JSON.stringify(process.env.FORM_SECRET));
   if (secret !== process.env.FORM_SECRET) {
     return res.status(401).json({ error: 'No autorizado' });
   }
