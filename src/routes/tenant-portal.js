@@ -1,6 +1,6 @@
 // Portal del Inquilino - rutas publicas con auth propio (sin JWT de admin)
 import { Router } from 'express';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query } from '../lib/db.js';
 import { getCycles, daysUntil } from '../lib/cycles.js';
