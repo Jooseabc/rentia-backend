@@ -8,20 +8,21 @@ import { generateReceiptPDF } from '../lib/pdf.js';
 
 const router = Router();
 
-// ============================================================
-// RUTAS PUBLICAS (sin autenticacion) - DEBEN IR PRIMERO
-// ============================================================
+// Helper: normaliza una fecha (Date o string) a "YYYY-MM-DD"
+function toISODate(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value.slice(0, 10);
+  return new Date(value).toISOString().slice(0, 10);
+}
 
-// POST /api/tenants/form-intake — recibe datos desde Google Forms
+// ============================================================
+// RUTAS PUBLICAS (sin autenticacion)
+// ============================================================
 router.post('/form-intake', async (req, res) => {
   const secret = req.headers['x-form-secret'];
-  console.log('[form-intake] Secret recibido:', JSON.stringify(secret));
-  console.log('[form-intake] Secret esperado: "saa2024"');
-
   if (secret !== 'saa2024') {
     return res.status(401).json({ error: 'No autorizado' });
   }
-
   try {
     const {
       full_name, dni, phone, email,
@@ -308,9 +309,10 @@ router.get('/dashboard/summary', async (_req, res) => {
 
     let unpaidPast = 0;
     for (let i = 0; i < cycles.length - 1; i++) {
-      if (!tp.some((p) => p.period_start === cycles[i].start)) unpaidPast++;
+      // FIX: comparar siempre con strings
+      if (!tp.some((p) => toISODate(p.period_start) === cycles[i].start)) unpaidPast++;
     }
-    const paidCurrent = tp.some((p) => p.period_start === cur.start);
+    const paidCurrent = tp.some((p) => toISODate(p.period_start) === cur.start);
 
     if (unpaidPast > 0) {
       overdueCount++;
@@ -362,7 +364,8 @@ router.get('/payments/all', async (_req, res) => {
     const cycles = getCycles(t.entry_date);
     const tp = payments.filter((p) => p.tenant_id === t.id);
     cycles.forEach((c, i) => {
-      const pay = tp.find((p) => p.period_start === c.start);
+      // FIX: comparar siempre con strings, no objetos Date
+      const pay = tp.find((p) => toISODate(p.period_start) === c.start);
       let kind;
       if (pay) kind = 'paid';
       else if (i === cycles.length - 1) kind = 'pending';
