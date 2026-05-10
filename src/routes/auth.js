@@ -4,6 +4,7 @@ import { query } from '../lib/db.js';
 import { hashPassword, verifyPassword, signToken } from '../lib/auth.js';
 import { validate } from '../middleware/validate.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { recordAudit } from '../lib/audit.js';
 
 const router = Router();
 
@@ -85,7 +86,9 @@ router.get('/users', requireAuth, async (_req, res) => {
 router.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
   if (req.params.id === req.user.id)
     return res.status(400).json({ error: 'No puedes eliminar tu propia cuenta' });
-  await query('DELETE FROM users WHERE id = $1', [req.params.id]);
+  const r = await query('DELETE FROM users WHERE id = $1 RETURNING email', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+  await recordAudit({ req, action: 'delete', entity: 'user', entityId: req.params.id, details: { email: r.rows[0].email } });
   res.json({ ok: true });
 });
 
@@ -103,6 +106,19 @@ router.post('/change-password', requireAuth, validate(changePwdSchema), async (r
   const newHash = await hashPassword(newPassword);
   await query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, req.user.id]);
   res.json({ ok: true });
+});
+
+// GET /api/auth/audit-log (admin) — últimos 200 eventos, opcional filtro por entity
+router.get('/audit-log', requireAuth, requireAdmin, async (req, res) => {
+  const entity = req.query.entity ? String(req.query.entity).slice(0, 40) : null;
+  const sql = entity
+    ? `SELECT id, actor_email, action, entity, entity_id, details, ip, created_at
+         FROM audit_log WHERE entity = $1 ORDER BY created_at DESC LIMIT 200`
+    : `SELECT id, actor_email, action, entity, entity_id, details, ip, created_at
+         FROM audit_log ORDER BY created_at DESC LIMIT 200`;
+  const params = entity ? [entity] : [];
+  const r = await query(sql, params);
+  res.json({ events: r.rows });
 });
 
 export default router;

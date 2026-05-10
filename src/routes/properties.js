@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { query } from '../lib/db.js';
 import { validate } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/auth.js';
+import { recordAudit } from '../lib/audit.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -37,6 +38,7 @@ router.post('/', validate(propSchema), async (req, res) => {
      VALUES ($1, $2, $3, $4, $5) RETURNING *`,
     [name, address || null, type, notes || null, req.user.id]
   );
+  await recordAudit({ req, action: 'create', entity: 'property', entityId: r.rows[0].id, details: { name } });
   res.json({ property: r.rows[0] });
 });
 
@@ -47,6 +49,7 @@ router.put('/:id', validate(propSchema), async (req, res) => {
     [name, address || null, type, notes || null, req.params.id]
   );
   if (r.rowCount === 0) return res.status(404).json({ error: 'Propiedad no encontrada' });
+  await recordAudit({ req, action: 'update', entity: 'property', entityId: req.params.id });
   res.json({ property: r.rows[0] });
 });
 
@@ -60,7 +63,9 @@ router.delete('/:id', async (req, res) => {
   );
   if (check.rows[0].c > 0)
     return res.status(409).json({ error: 'No puedes eliminar una propiedad con inquilinos activos' });
-  await query('DELETE FROM properties WHERE id = $1', [req.params.id]);
+  const r = await query('DELETE FROM properties WHERE id = $1', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: 'Propiedad no encontrada' });
+  await recordAudit({ req, action: 'delete', entity: 'property', entityId: req.params.id });
   res.json({ ok: true });
 });
 
@@ -93,6 +98,7 @@ router.post('/units', validate(unitSchema), async (req, res) => {
      VALUES ($1, $2, $3, $4) RETURNING *`,
     [property_id, name, default_rent || 0, notes || null]
   );
+  await recordAudit({ req, action: 'create', entity: 'unit', entityId: r.rows[0].id, details: { property_id, name } });
   res.json({ unit: r.rows[0] });
 });
 
@@ -103,8 +109,61 @@ router.put('/units/:id', validate(unitSchema.omit({ property_id: true })), async
     [name, default_rent || 0, notes || null, req.params.id]
   );
   if (r.rowCount === 0) return res.status(404).json({ error: 'Unidad no encontrada' });
+  await recordAudit({ req, action: 'update', entity: 'unit', entityId: req.params.id });
   res.json({ unit: r.rows[0] });
 });
+
+// GET /api/properties/units/:id/history — historial de inquilinos en esta unidad
+router.get('/units/:id/history', async (req, res) => {
+  // Verifica que la unidad existe (404 explícito en lugar de array vacío)
+  const u = await query(
+    `SELECT u.id, u.name, p.name AS property_name, p.address AS property_address
+       FROM units u
+       JOIN properties p ON p.id = u.property_id
+      WHERE u.id = $1`,
+    [req.params.id]
+  );
+  if (u.rowCount === 0) return res.status(404).json({ error: 'Unidad no encontrada' });
+
+  const r = await query(
+    `SELECT a.id, a.start_date, a.end_date, a.reason,
+            t.id   AS tenant_id,
+            t.full_name,
+            t.dni,
+            t.phone,
+            t.email,
+            t.status AS tenant_status,
+            COALESCE(SUM(p.amount) FILTER (WHERE p.voided_at IS NULL), 0)::numeric AS total_paid,
+            COUNT(p.id)         FILTER (WHERE p.voided_at IS NULL)::int           AS payments_count
+       FROM unit_assignments a
+       JOIN tenants t      ON t.id = a.tenant_id
+  LEFT JOIN payments p     ON p.tenant_id = t.id
+                          AND p.period_start >= a.start_date
+                          AND (a.end_date IS NULL OR p.period_start <= a.end_date)
+      WHERE a.unit_id = $1
+      GROUP BY a.id, t.id
+      ORDER BY a.start_date DESC, a.created_at DESC`,
+    [req.params.id]
+  );
+
+  res.json({
+    unit: u.rows[0],
+    assignments: r.rows.map((row) => ({
+      ...row,
+      // Cálculo en frontend si quiere días, pero ofrecemos pista
+      months: monthsBetween(row.start_date, row.end_date),
+    })),
+  });
+});
+
+// Meses aproximados entre dos fechas (end null => hasta hoy)
+function monthsBetween(startVal, endVal) {
+  if (!startVal) return 0;
+  const s = startVal instanceof Date ? startVal : new Date(startVal);
+  const e = endVal ? (endVal instanceof Date ? endVal : new Date(endVal)) : new Date();
+  const months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+  return Math.max(0, months);
+}
 
 router.delete('/units/:id', async (req, res) => {
   const check = await query(
@@ -113,7 +172,9 @@ router.delete('/units/:id', async (req, res) => {
   );
   if (check.rows[0].c > 0)
     return res.status(409).json({ error: 'No puedes eliminar una unidad con inquilino activo' });
-  await query('DELETE FROM units WHERE id = $1', [req.params.id]);
+  const r = await query('DELETE FROM units WHERE id = $1', [req.params.id]);
+  if (r.rowCount === 0) return res.status(404).json({ error: 'Unidad no encontrada' });
+  await recordAudit({ req, action: 'delete', entity: 'unit', entityId: req.params.id });
   res.json({ ok: true });
 });
 

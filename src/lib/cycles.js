@@ -1,17 +1,36 @@
 import { query } from './db.js';
 
+// Normaliza un valor (string ISO o Date) a "YYYY-MM-DD" sin sufrir corrimientos por TZ.
+// pg devuelve columnas DATE como objetos Date en la TZ local, por lo que
+// `new Date(...).toISOString()` puede retroceder un día en zonas con UTC negativo.
+function toLocalISODate(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value.slice(0, 10);
+  const d = value instanceof Date ? value : new Date(value);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function toISO(y, m, d) {
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
 export function addMonthsISO(isoDate, months) {
-  const str = typeof isoDate === 'string' ? isoDate.slice(0, 10) : new Date(isoDate).toISOString().slice(0, 10);
+  const str = toLocalISODate(isoDate);
   const [y, m, d] = str.split('-').map(Number);
-  const date = new Date(y, m - 1 + months, 1);
-  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  date.setDate(Math.min(d, lastDay));
-  return date.toISOString().slice(0, 10);
+  // Calcular año/mes destino sin construir Date (evita TZ).
+  const totalMonths = (y * 12 + (m - 1)) + months;
+  const ny = Math.floor(totalMonths / 12);
+  const nm = (totalMonths % 12) + 1;
+  // Último día del mes destino: el día 0 del mes siguiente.
+  const lastDay = new Date(ny, nm, 0).getDate();
+  return toISO(ny, nm, Math.min(d, lastDay));
 }
 
 export function currentCycleIndex(entryISO, refDate = new Date()) {
-  const str = typeof entryISO === 'string' ? entryISO.slice(0, 10) : new Date(entryISO).toISOString().slice(0, 10);
-  const [eYear, eMonth, eDay] = str.split('-').map(Number);
+  const [eYear, eMonth, eDay] = toLocalISODate(entryISO).split('-').map(Number);
   const today = new Date(refDate);
   const tYear = today.getFullYear();
   const tMonth = today.getMonth() + 1;
@@ -41,7 +60,7 @@ export async function rentAtDate(tenantId, dateISO, defaultRent) {
 }
 
 export function daysUntil(isoDate, refDate = new Date()) {
-  const d = new Date(isoDate.slice(0, 10) + 'T00:00:00');
+  const d = new Date(toLocalISODate(isoDate) + 'T00:00:00');
   const t = new Date(refDate);
   t.setHours(0, 0, 0, 0);
   return Math.round((d - t) / (1000 * 60 * 60 * 24));
@@ -56,7 +75,7 @@ export function fmtMoney(n, currency = 'S/') {
 
 export function fmtDate(iso) {
   if (!iso) return '—';
-  const str = typeof iso === 'string' ? iso.slice(0, 10) : new Date(iso).toISOString().slice(0, 10);
+  const str = toLocalISODate(iso);
   const [y, m, d] = str.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('es-PE', {
     day: '2-digit', month: 'long', year: 'numeric',
