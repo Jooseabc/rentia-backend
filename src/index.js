@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
 import authRouter from './routes/auth.js';
@@ -14,16 +15,34 @@ const app = express();
 const PORT = Number(process.env.PORT || 4000);
 app.set('trust proxy', 1);
 
-// CORS
-const origins = (process.env.CORS_ORIGIN || '*')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+// ── Helmet: cabeceras de seguridad por defecto ───────────────────
+// Desactivamos CSP porque es una API; el frontend (Render Static) tiene la
+// suya. Mantenemos HSTS, X-Content-Type-Options, X-Frame-Options, etc.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // permite que el frontend descargue PDFs
+}));
+
+// ── CORS ─────────────────────────────────────────────────────────
+// Lee CORS_ORIGIN de env (separados por coma). Si no está, lanza warning
+// y deja la API en modo "sin origen permitido" excepto requests sin origin
+// (curl, server-to-server). NUNCA usar "*" en producción.
+const rawOrigins = (process.env.CORS_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
+const allowAny = rawOrigins.includes('*');
+
+if (rawOrigins.length === 0) {
+  console.warn('[server] ⚠ CORS_ORIGIN no configurado → solo se aceptarán requests sin Origin');
+}
+if (allowAny) {
+  console.warn('[server] ⚠ CORS_ORIGIN incluye "*" → cualquier dominio puede llamar al API');
+}
 
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin || origins.includes('*') || origins.includes(origin)) return cb(null, true);
+      // Requests sin Origin (curl, health checks, server-to-server) siempre permitidos
+      if (!origin) return cb(null, true);
+      if (allowAny || rawOrigins.includes(origin)) return cb(null, true);
       cb(new Error(`CORS: origen no permitido (${origin})`));
     },
     credentials: true,
@@ -32,7 +51,7 @@ app.use(
 
 app.use(express.json({ limit: '1mb' }));
 
-// Rate limit en auth
+// Rate limit global más agresivo en /auth/register para frenar bots
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
@@ -58,6 +77,10 @@ app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 
 // Error handler
 app.use((err, _req, res, _next) => {
+  // CORS rejections vienen aquí con un error específico
+  if (err && /^CORS:/.test(err.message)) {
+    return res.status(403).json({ error: err.message });
+  }
   console.error('[server]', err);
   res.status(err.status || 500).json({ error: err.message || 'Error del servidor' });
 });
@@ -67,7 +90,7 @@ migrate()
   .then(() => {
     app.listen(PORT, () => {
       console.log(`[server] ✔ SAA API escuchando en :${PORT}`);
-      console.log(`[server]   CORS permitidos: ${origins.join(', ') || '(ninguno)'}`);
+      console.log(`[server]   CORS permitidos: ${rawOrigins.join(', ') || '(ninguno explícito)'}`);
       startReminderJob();
     });
   })
