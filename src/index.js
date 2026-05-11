@@ -51,15 +51,33 @@ app.use(
 
 app.use(express.json({ limit: '1mb' }));
 
-// Rate limit global más agresivo en /auth/register para frenar bots
-const authLimiter = rateLimit({
+// ── Rate limits anti fuerza-bruta ────────────────────────────────
+// Login: 5 intentos FALLIDOS por IP cada 15 min. Los logins exitosos no
+// consumen cupo, así que un usuario legítimo nunca se ve afectado.
+const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 5,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
+  message: { error: 'Demasiados intentos fallidos. Intenta de nuevo en 15 minutos.' },
 });
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
+
+// Register: 5 cuentas por IP cada hora. El sistema ya exige código de
+// invitación, esto es defensa adicional contra spam masivo.
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos de registro desde esta IP.' },
+});
+
+app.use('/api/auth/login',    loginLimiter);
+app.use('/api/auth/register', registerLimiter);
+
+// Login del portal de inquilinos: mismo trato que el admin login.
+app.use('/api/tenant-portal/login', loginLimiter);
 
 // Health
 app.get('/api/health', (_req, res) => {
