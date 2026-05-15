@@ -1,7 +1,7 @@
 {
-  "name": "saa-backend",
+  "name": "rentia-backend",
   "version": "1.0.0",
-  "description": "Sistema Automatizado de Alquileres - Backend API",
+  "description": "Rentia - Plataforma SaaS de gestión de alquileres",
   "main": "src/index.js",
   "type": "module",
   "scripts": {

@@ -23,7 +23,7 @@ export function generateTenantStatementPDF({ tenant, unit, property, items, tota
     // Header
     doc.fillColor(accent).rect(48, 48, 50, 50).fill();
     doc.fillColor('#fde68a').font('Helvetica-Bold').fontSize(16)
-       .text('SAA', 48, 64, { width: 50, align: 'center' });
+       .text('R', 48, 64, { width: 50, align: 'center' });
 
     doc.fillColor(dark).font('Helvetica-Bold').fontSize(18)
        .text('Estado de cuenta', 112, 54);
@@ -108,7 +108,7 @@ export function generateTenantStatementPDF({ tenant, unit, property, items, tota
     // Footer
     doc.fillColor(muted).font('Helvetica').fontSize(7)
        .text(
-         `Documento informativo · Sistema Automatizado de Alquileres · No tiene validez tributaria`,
+         `Documento informativo · Rentia · No tiene validez tributaria`,
          48, 800, { width: 499, align: 'center' }
        );
 
@@ -137,7 +137,7 @@ export function generateMonthlySummaryPDF({ month, from, to, collected, pending 
     // Header
     doc.fillColor(accent).rect(48, 48, 50, 50).fill();
     doc.fillColor('#fde68a').font('Helvetica-Bold').fontSize(16)
-       .text('SAA', 48, 64, { width: 50, align: 'center' });
+       .text('R', 48, 64, { width: 50, align: 'center' });
 
     doc.fillColor(dark).font('Helvetica-Bold').fontSize(18)
        .text('Resumen mensual', 112, 54);
@@ -241,7 +241,7 @@ export function generateMonthlySummaryPDF({ month, from, to, collected, pending 
     // Footer
     doc.fillColor(muted).font('Helvetica').fontSize(7)
        .text(
-         `Generado el ${fmtDate(new Date().toISOString().slice(0, 10))} · Sistema Automatizado de Alquileres`,
+         `Generado el ${fmtDate(new Date().toISOString().slice(0, 10))} · Rentia`,
          48, 800, { width: 499, align: 'center' }
        );
 
@@ -272,7 +272,7 @@ export function generateReceiptPDF({ payment, tenant, unit, property, settings =
       .fillColor('#fde68a')
       .font('Helvetica-Bold')
       .fontSize(16)
-      .text('SAA', 36, 52, { width: 50, align: 'center' });
+      .text('R', 36, 52, { width: 50, align: 'center' });
 
     doc
       .fillColor(dark)
@@ -284,7 +284,7 @@ export function generateReceiptPDF({ payment, tenant, unit, property, settings =
       .fillColor(muted)
       .font('Helvetica')
       .fontSize(9)
-      .text('Sistema Automatizado de Alquileres', 100, 60);
+      .text('Rentia', 100, 60);
 
     doc
       .fillColor(dark)
@@ -426,7 +426,7 @@ export function generateReceiptPDF({ payment, tenant, unit, property, settings =
       .font('Helvetica')
       .fontSize(7)
       .text(
-        `Documento generado por ${settings.appName || 'SAA'} el ${fmtDate(
+        `Documento generado por ${settings.appName || 'Rentia'} el ${fmtDate(
           new Date().toISOString().slice(0, 10)
         )} · No tiene validez tributaria`,
         36,

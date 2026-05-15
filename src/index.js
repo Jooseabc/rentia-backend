@@ -81,7 +81,7 @@ app.use('/api/tenant-portal/login', loginLimiter);
 
 // Health
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, name: 'SAA API', version: '1.0.0' });
+  res.json({ ok: true, name: 'Rentia API', version: '1.0.0' });
 });
 
 // Rutas
@@ -107,7 +107,7 @@ app.use((err, _req, res, _next) => {
 migrate()
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`[server] ✔ SAA API escuchando en :${PORT}`);
+      console.log(`[server] ✔ Rentia API escuchando en :${PORT}`);
       console.log(`[server]   CORS permitidos: ${rawOrigins.join(', ') || '(ninguno explícito)'}`);
       startReminderJob();
     });

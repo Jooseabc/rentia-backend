@@ -20,7 +20,7 @@ function buildEmail({ tenant, cycle, kind, days }) {
   const html = `
     <div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#f4efe3">
       <div style="background:#fff;border-radius:16px;padding:32px">
-        <div style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;background:#064e3b;color:#fde68a;border-radius:10px;font-weight:700;letter-spacing:.5px">SAA</div>
+        <div style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;background:#064e3b;color:#fde68a;border-radius:10px;font-weight:700;letter-spacing:.5px">R</div>
         <h1 style="font-family:Georgia,serif;color:#1c1917;margin:24px 0 8px;font-size:24px">
           ${kind === 'reminder' ? 'Recordatorio de pago' : 'Tu alquiler está vencido'}
         </h1>
@@ -42,7 +42,7 @@ function buildEmail({ tenant, cycle, kind, days }) {
             : `<p style="color:#57534e;font-size:14px;margin:0">Vence en <strong>${days} día${days === 1 ? '' : 's'}</strong>.</p>`
         }
         <p style="color:#a8a29e;font-size:12px;margin-top:32px;text-align:center">
-          Sistema Automatizado de Alquileres · este es un mensaje automático
+          Rentia · este es un mensaje automático
         </p>
       </div>
     </div>`;

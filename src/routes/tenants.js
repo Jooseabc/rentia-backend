@@ -119,7 +119,7 @@ const tenantSchema = z.object({
   notes: z.string().optional().nullable(),
 });
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   const r = await query(`
     SELECT t.*,
       u.name  AS unit_name,
@@ -128,8 +128,9 @@ router.get('/', async (_req, res) => {
     FROM tenants t
     LEFT JOIN units u      ON u.id = t.unit_id
     LEFT JOIN properties p ON p.id = u.property_id
+    WHERE t.owner_id = $1
     ORDER BY t.full_name
-  `);
+  `, [req.user.id]);
   res.json({ tenants: r.rows });
 });
 
@@ -142,8 +143,8 @@ router.get('/:id', async (req, res) => {
     FROM tenants t
     LEFT JOIN units u      ON u.id = t.unit_id
     LEFT JOIN properties p ON p.id = u.property_id
-    WHERE t.id = $1
-  `, [req.params.id]);
+    WHERE t.id = $1 AND t.owner_id = $2
+  `, [req.params.id, req.user.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: 'Inquilino no encontrado' });
 
   const tenant = r.rows[0];
@@ -184,8 +185,8 @@ router.post('/', validate(tenantSchema), async (req, res) => {
     await client.query('BEGIN');
     const r = await client.query(
       `INSERT INTO tenants (full_name, dni, phone, email, emergency_contact, emergency_phone,
-        unit_id, entry_date, monthly_rent, deposit, status, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        unit_id, entry_date, monthly_rent, deposit, status, notes, created_by, owner_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
        RETURNING *`,
       [t.full_name, t.dni || null, t.phone || null, t.email || null,
        t.emergency_contact || null, t.emergency_phone || null,
@@ -221,8 +222,8 @@ router.put('/:id', validate(tenantSchema), async (req, res) => {
     await client.query('BEGIN');
     // Estado anterior para detectar cambio de unidad/status
     const prev = await client.query(
-      'SELECT unit_id, status, entry_date FROM tenants WHERE id = $1',
-      [req.params.id]
+      'SELECT unit_id, status, entry_date FROM tenants WHERE id = $1 AND owner_id = $2',
+      [req.params.id, req.user.id]
     );
     if (prev.rowCount === 0) {
       await client.query('ROLLBACK');
@@ -291,8 +292,8 @@ router.put('/:id', validate(tenantSchema), async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  const before = await query('SELECT full_name FROM tenants WHERE id = $1', [req.params.id]);
-  const r = await query('DELETE FROM tenants WHERE id = $1', [req.params.id]);
+  const before = await query('SELECT full_name FROM tenants WHERE id = $1 AND owner_id = $2', [req.params.id, req.user.id]);
+  const r = await query('DELETE FROM tenants WHERE id = $1 AND owner_id = $2', [req.params.id, req.user.id]);
   if (r.rowCount === 0) return res.status(404).json({ error: 'Inquilino no encontrado' });
   await recordAudit({ req, action: 'delete', entity: 'tenant', entityId: req.params.id, details: before.rows[0] || null });
   res.json({ ok: true });
@@ -337,9 +338,13 @@ const paymentSchema = z.object({
 router.post('/payments', validate(paymentSchema), async (req, res) => {
   const p = req.body;
   try {
+    // Verify tenant belongs to this owner
+    const tCheck = await query('SELECT id FROM tenants WHERE id = $1 AND owner_id = $2', [p.tenant_id, req.user.id]);
+    if (tCheck.rowCount === 0) return res.status(404).json({ error: 'Inquilino no encontrado' });
+
     const r = await query(
-      `INSERT INTO payments (tenant_id, period_start, period_end, paid_date, amount, method, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO payments (tenant_id, period_start, period_end, paid_date, amount, method, notes, created_by, owner_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING *`,
       [p.tenant_id, p.period_start, p.period_end, p.paid_date, p.amount, p.method, p.notes || null, req.user.id]
     );
     await recordAudit({
@@ -374,7 +379,7 @@ router.delete('/payments/:id', requireAdmin, async (req, res) => {
 });
 
 // Listar pagos anulados (admin) — para revisión
-router.get('/payments/voided', requireAdmin, async (_req, res) => {
+router.get('/payments/voided', requireAdmin, async (req, res) => {
   const r = await query(
     `SELECT pay.id, pay.tenant_id, pay.period_start, pay.period_end, pay.amount,
             pay.voided_at, pay.void_reason,
@@ -383,9 +388,9 @@ router.get('/payments/voided', requireAdmin, async (_req, res) => {
        FROM payments pay
        JOIN tenants t ON t.id = pay.tenant_id
   LEFT JOIN users u   ON u.id = pay.voided_by
-      WHERE pay.voided_at IS NOT NULL
+      WHERE pay.voided_at IS NOT NULL AND t.owner_id = $1
       ORDER BY pay.voided_at DESC
-      LIMIT 200`
+      LIMIT 200`, [req.user.id]
   );
   res.json({ payments: r.rows });
 });
@@ -433,9 +438,12 @@ const incidentSchema = z.object({
 
 router.post('/incidents', validate(incidentSchema), async (req, res) => {
   const i = req.body;
+  const tCheck = await query('SELECT id FROM tenants WHERE id = $1 AND owner_id = $2', [i.tenant_id, req.user.id]);
+  if (tCheck.rowCount === 0) return res.status(404).json({ error: 'Inquilino no encontrado' });
+
   const r = await query(
-    `INSERT INTO incidents (tenant_id, date, type, description, created_by)
-     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    `INSERT INTO incidents (tenant_id, date, type, description, created_by, owner_id)
+     VALUES ($1,$2,$3,$4,$5,$5) RETURNING *`,
     [i.tenant_id, i.date, i.type, i.description, req.user.id]
   );
   await recordAudit({ req, action: 'create', entity: 'incident', entityId: r.rows[0].id, details: { tenant_id: i.tenant_id, type: i.type } });
@@ -459,9 +467,12 @@ const rentChangeSchema = z.object({
 
 router.post('/rent-changes', validate(rentChangeSchema), async (req, res) => {
   const c = req.body;
+  const tCheck = await query('SELECT id FROM tenants WHERE id = $1 AND owner_id = $2', [c.tenant_id, req.user.id]);
+  if (tCheck.rowCount === 0) return res.status(404).json({ error: 'Inquilino no encontrado' });
+
   const r = await query(
-    `INSERT INTO rent_changes (tenant_id, effective_date, new_rent, reason, created_by)
-     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    `INSERT INTO rent_changes (tenant_id, effective_date, new_rent, reason, created_by, owner_id)
+     VALUES ($1,$2,$3,$4,$5,$5) RETURNING *`,
     [c.tenant_id, c.effective_date, c.new_rent, c.reason || null, req.user.id]
   );
   if (new Date(c.effective_date) <= new Date()) {
@@ -479,10 +490,16 @@ router.delete('/rent-changes/:id', async (req, res) => {
 });
 
 // ============== RESUMEN / DASHBOARD ==============
-router.get('/dashboard/summary', async (_req, res) => {
-  const tenants = (await query('SELECT * FROM tenants WHERE status = $1', ['active'])).rows;
-  const payments = (await query('SELECT * FROM payments WHERE voided_at IS NULL')).rows;
-  const totalUnits = (await query('SELECT COUNT(*)::int AS c FROM units')).rows[0].c;
+router.get('/dashboard/summary', async (req, res) => {
+  const tenants = (await query('SELECT * FROM tenants WHERE status = $1 AND owner_id = $2', ['active', req.user.id])).rows;
+  const payments = (await query(
+    `SELECT p.* FROM payments p
+     JOIN tenants t ON t.id = p.tenant_id
+     WHERE p.voided_at IS NULL AND t.owner_id = $1`, [req.user.id]
+  )).rows;
+  const totalUnits = (await query(
+    'SELECT COUNT(*)::int AS c FROM units WHERE owner_id = $1', [req.user.id]
+  )).rows[0].c;
   const occupied = new Set(tenants.filter((t) => t.unit_id).map((t) => t.unit_id)).size;
   const monthlyIncome = tenants.reduce((s, t) => s + Number(t.monthly_rent || 0), 0);
 
@@ -564,8 +581,8 @@ router.get('/:id/statement.pdf', async (req, res) => {
        FROM tenants t
   LEFT JOIN units u      ON u.id = t.unit_id
   LEFT JOIN properties p ON p.id = u.property_id
-      WHERE t.id = $1`,
-    [req.params.id]
+      WHERE t.id = $1 AND t.owner_id = $2`,
+    [req.params.id, req.user.id]
   );
   if (r.rowCount === 0) return res.status(404).json({ error: 'Inquilino no encontrado' });
   const tenant = r.rows[0];
@@ -647,8 +664,8 @@ router.get('/payments/export.csv', async (req, res) => {
   const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : null;
   const to   = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to   || '') ? req.query.to   : null;
 
-  const where = ['pay.voided_at IS NULL'];
-  const params = [];
+  const params = [req.user.id];
+  const where = ['pay.voided_at IS NULL', 't.owner_id = $1'];
   if (from) { params.push(from); where.push(`pay.paid_date >= $${params.length}`); }
   if (to)   { params.push(to);   where.push(`pay.paid_date <= $${params.length}`); }
 
@@ -696,7 +713,7 @@ router.get('/payments/export.csv', async (req, res) => {
 });
 
 // GET /api/tenants/payments/monthly-summary.pdf?month=YYYY-MM
-router.get('/payments/monthly-summary.pdf', async (req, res) => {
+router.get('/payments/monthly-summary.pdf', async (req, res) => {  // owner-scoped
   const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : null;
   if (!month) return res.status(400).json({ error: 'month=YYYY-MM es obligatorio' });
   const [y, m] = month.split('-').map(Number);
@@ -712,9 +729,9 @@ router.get('/payments/monthly-summary.pdf', async (req, res) => {
        JOIN tenants t ON t.id = pay.tenant_id
   LEFT JOIN units u   ON u.id = t.unit_id
   LEFT JOIN properties p ON p.id = u.property_id
-      WHERE pay.voided_at IS NULL AND pay.paid_date BETWEEN $1 AND $2
+      WHERE pay.voided_at IS NULL AND pay.paid_date BETWEEN $1 AND $2 AND t.owner_id = $3
       ORDER BY pay.paid_date ASC`,
-    [from, to]
+    [from, to, req.user.id]
   )).rows;
 
   // Pendientes: por cada inquilino activo, mira sus ciclos cuyo period_start
@@ -725,9 +742,13 @@ router.get('/payments/monthly-summary.pdf', async (req, res) => {
        FROM tenants t
   LEFT JOIN units u      ON u.id = t.unit_id
   LEFT JOIN properties p ON p.id = u.property_id
-      WHERE t.status = 'active'`
+      WHERE t.status = 'active' AND t.owner_id = $1`, [req.user.id]
   )).rows;
-  const allPayments = (await query('SELECT tenant_id, period_start FROM payments WHERE voided_at IS NULL')).rows;
+  const allPayments = (await query(
+    `SELECT p.tenant_id, p.period_start FROM payments p
+     JOIN tenants t ON t.id = p.tenant_id
+     WHERE p.voided_at IS NULL AND t.owner_id = $1`, [req.user.id]
+  )).rows;
 
   const pending = [];
   for (const t of tenants) {
@@ -756,16 +777,20 @@ router.get('/payments/monthly-summary.pdf', async (req, res) => {
 });
 
 // GET /api/tenants/payments/all - vista global de pagos
-router.get('/payments/all', async (_req, res) => {  // pagos anulados ya excluidos
+router.get('/payments/all', async (req, res) => {  // pagos anulados ya excluidos
 
   const tenants = (await query(
     `SELECT t.*, u.name AS unit_name, p.name AS property_name
      FROM tenants t
      LEFT JOIN units u      ON u.id = t.unit_id
      LEFT JOIN properties p ON p.id = u.property_id
-     WHERE t.status = 'active'`
+     WHERE t.status = 'active' AND t.owner_id = $1`, [req.user.id]
   )).rows;
-  const payments = (await query('SELECT * FROM payments WHERE voided_at IS NULL')).rows;
+  const payments = (await query(
+    `SELECT p.* FROM payments p
+     JOIN tenants t ON t.id = p.tenant_id
+     WHERE p.voided_at IS NULL AND t.owner_id = $1`, [req.user.id]
+  )).rows;
   const items = [];
   for (const t of tenants) {
     const cycles = getCycles(t.entry_date);

@@ -1,6 +1,5 @@
 -- =========================================================
--- SAA - Sistema Automatizado de Alquileres
--- Esquema inicial de base de datos (v2 - sin CITEXT)
+-- Rentia — Esquema inicial de base de datos
 -- =========================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
