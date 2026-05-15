@@ -44,59 +44,7 @@ async function freeUnitIfBusy(client, unitId, endDate, reason) {
   );
 }
 
-// ============================================================
-// RUTAS PUBLICAS (sin autenticacion)
-// ============================================================
-const FORM_INTAKE_SECRET = process.env.FORM_INTAKE_SECRET || '';
-router.post('/form-intake', async (req, res) => {
-  if (!FORM_INTAKE_SECRET) {
-    console.warn('[form-intake] FORM_INTAKE_SECRET no está configurado; endpoint deshabilitado.');
-    return res.status(503).json({ error: 'Endpoint no disponible' });
-  }
-  const secret = req.headers['x-form-secret'];
-  if (secret !== FORM_INTAKE_SECRET) {
-    return res.status(401).json({ error: 'No autorizado' });
-  }
-  try {
-    const {
-      full_name, dni, phone, email,
-      emergency_contact, emergency_phone,
-      entry_date, monthly_rent, deposit, notes,
-    } = req.body;
-
-    if (!full_name || !entry_date) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios: full_name, entry_date' });
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(entry_date)) {
-      return res.status(400).json({ error: 'entry_date debe estar en formato YYYY-MM-DD' });
-    }
-
-    const r = await query(
-      `INSERT INTO tenants
-        (full_name, dni, phone, email, emergency_contact, emergency_phone,
-         entry_date, monthly_rent, deposit, status, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10)
-       RETURNING id, full_name`,
-      [
-        full_name.trim(),
-        dni || null,
-        phone || null,
-        email || null,
-        emergency_contact || null,
-        emergency_phone || null,
-        entry_date,
-        Number(monthly_rent || 0),
-        Number(deposit || 0),
-        notes || null,
-      ]
-    );
-    console.log(`[form-intake] Nuevo inquilino: ${r.rows[0].full_name}`);
-    res.json({ ok: true, tenant: r.rows[0] });
-  } catch (err) {
-    console.error('[form-intake] Error:', err.message);
-    res.status(500).json({ error: 'Error al registrar inquilino' });
-  }
-});
+// form-intake eliminado: incompatible con multi-tenancy (owner_id NOT NULL).
 
 // ============================================================
 // A PARTIR DE AQUI TODAS LAS RUTAS REQUIEREN AUTENTICACION
