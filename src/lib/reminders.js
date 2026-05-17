@@ -1,6 +1,7 @@
 // Cron interno (sin libs externas) para enviar recordatorios diarios
 import { query } from './db.js';
 import { mailEnabled, sendMail } from './mail.js';
+import { pushEnabled, sendToUser } from './push.js';
 import { getCycles, daysUntil, fmtDate, fmtMoney } from './cycles.js';
 
 const REMINDER_DAYS_BEFORE = Number(process.env.REMINDER_DAYS_BEFORE || 3);
@@ -95,8 +96,8 @@ export async function sendTenantReminder(tenantId, { force = false } = {}) {
   const { subject, html } = buildEmail({ tenant, cycle: cur, kind, days });
   await sendMail({ to: tenant.email, subject, html });
   await query(
-    'INSERT INTO notifications_log (tenant_id, kind, reference) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-    [tenant.id, kind, reference]
+    'INSERT INTO notifications_log (tenant_id, owner_id, kind, reference) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+    [tenant.id, tenant.owner_id, kind, reference]
   );
   return { ok: true, kind };
 }
@@ -147,8 +148,8 @@ async function processReminders() {
       try {
         await sendMail({ to: t.email, subject, html });
         await query(
-          'INSERT INTO notifications_log (tenant_id, kind, reference) VALUES ($1, $2, $3)',
-          [t.id, kind, reference]
+          'INSERT INTO notifications_log (tenant_id, owner_id, kind, reference) VALUES ($1, $2, $3, $4)',
+          [t.id, t.owner_id, kind, reference]
         );
         sent++;
       } catch (err) {
@@ -161,9 +162,94 @@ async function processReminders() {
   }
 }
 
-export function startReminderJob() {
-  processReminders();
-  setInterval(processReminders, 12 * 60 * 60 * 1000);
+// =========================================================
+// Push al propietario: avisa cuando un pago de inquilino
+//   (a) vence HOY  → kind 'push_due_today'
+//   (b) está atrasado → kind 'push_overdue' (cada 3 días)
+// Deduplicación vía notifications_log (tenant_id, kind, reference).
+// =========================================================
+async function processOwnerPushes() {
+  if (!pushEnabled()) return;
+  try {
+    // Solo procesamos propietarios que tengan al menos una suscripción.
+    const tenants = (await query(
+      `SELECT t.id, t.owner_id, t.full_name, t.monthly_rent, t.entry_date,
+              u.name AS unit_name, p.name AS property_name
+         FROM tenants t
+         JOIN push_subscriptions ps ON ps.user_id = t.owner_id
+    LEFT JOIN units u      ON u.id = t.unit_id
+    LEFT JOIN properties p ON p.id = u.property_id
+        WHERE t.status = 'active'
+        GROUP BY t.id, u.name, p.name`
+    )).rows;
+    if (!tenants.length) return;
+
+    const payments = (await query('SELECT tenant_id, period_start FROM payments WHERE voided_at IS NULL')).rows;
+    let sent = 0;
+
+    for (const t of tenants) {
+      const cycles = getCycles(t.entry_date);
+      if (!cycles.length) continue;
+      const cur = cycles[cycles.length - 1];
+      const paid = payments.some(
+        (p) => p.tenant_id === t.id && toISODate(p.period_start) === cur.start
+      );
+      if (paid) continue;
+
+      const days = daysUntil(cur.end);
+      let kind = null;
+      if (days === 0) kind = 'push_due_today';
+      else if (days < 0 && Math.abs(days) % 3 === 0) kind = 'push_overdue';
+      if (!kind) continue;
+
+      const reference = kind === 'push_overdue'
+        ? `${cur.start}_push_overdue_${Math.abs(days)}`
+        : `${cur.start}_push_due_today`;
+
+      const exists = await query(
+        'SELECT 1 FROM notifications_log WHERE tenant_id = $1 AND kind = $2 AND reference = $3',
+        [t.id, kind, reference]
+      );
+      if (exists.rowCount > 0) continue;
+
+      const title = kind === 'push_overdue'
+        ? `Pago atrasado · ${t.full_name}`
+        : `Vence hoy · ${t.full_name}`;
+      const body = kind === 'push_overdue'
+        ? `${Math.abs(days)} día(s) de atraso · ${fmtMoney(t.monthly_rent)}${t.unit_name ? ' · ' + t.unit_name : ''}`
+        : `Vence el ${fmtDate(cur.end)} · ${fmtMoney(t.monthly_rent)}${t.unit_name ? ' · ' + t.unit_name : ''}`;
+
+      try {
+        const delivered = await sendToUser(t.owner_id, {
+          title, body,
+          tag:  `tenant-${t.id}-${kind}`,
+          url:  `/inquilinos/${t.id}`,
+          icon: '/icons/icon-192.png',
+          badge: '/icons/icon-192.png',
+        });
+        if (delivered > 0) {
+          await query(
+            'INSERT INTO notifications_log (tenant_id, owner_id, kind, reference) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+            [t.id, t.owner_id, kind, reference]
+          );
+          sent++;
+        }
+      } catch (err) {
+        console.error('[push-reminders] Error con tenant', t.id, err.message);
+      }
+    }
+    if (sent > 0) console.log(`[push-reminders] ✔ ${sent} notificación(es) push enviada(s)`);
+  } catch (err) {
+    console.error('[push-reminders] Error:', err);
+  }
 }
 
-export { processReminders };
+export function startReminderJob() {
+  processReminders();
+  processOwnerPushes();
+  setInterval(processReminders, 12 * 60 * 60 * 1000);
+  // Los push son baratos y queremos atrapar el "vence hoy" rápido: cada 2 h.
+  setInterval(processOwnerPushes, 2 * 60 * 60 * 1000);
+}
+
+export { processReminders, processOwnerPushes };

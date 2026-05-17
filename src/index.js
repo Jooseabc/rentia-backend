@@ -8,6 +8,7 @@ import authRouter from './routes/auth.js';
 import propertiesRouter from './routes/properties.js';
 import tenantsRouter from './routes/tenants.js';
 import tenantPortalRouter from './routes/tenant-portal.js';
+import pushRouter from './routes/push.js';
 import { startReminderJob } from './lib/reminders.js';
 import { migrate } from './lib/migrate.js';
 
@@ -89,6 +90,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/properties', propertiesRouter);
 app.use('/api/tenants', tenantsRouter);
 app.use('/api/tenant-portal', tenantPortalRouter);
+app.use('/api/push', pushRouter);
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
