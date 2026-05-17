@@ -44,7 +44,69 @@ async function freeUnitIfBusy(client, unitId, endDate, reason) {
   );
 }
 
-// form-intake eliminado: incompatible con multi-tenancy (owner_id NOT NULL).
+// ============================================================
+// RUTAS PUBLICAS (sin autenticacion)
+// ============================================================
+const FORM_INTAKE_SECRET = process.env.FORM_INTAKE_SECRET || '';
+router.post('/form-intake', async (req, res) => {
+  if (!FORM_INTAKE_SECRET) {
+    console.warn('[form-intake] FORM_INTAKE_SECRET no está configurado; endpoint deshabilitado.');
+    return res.status(503).json({ error: 'Endpoint no disponible' });
+  }
+  const secret = req.headers['x-form-secret'];
+  if (secret !== FORM_INTAKE_SECRET) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  try {
+    const {
+      owner_id,
+      full_name, dni, phone, email,
+      emergency_contact, emergency_phone,
+      entry_date, monthly_rent, deposit, notes,
+    } = req.body;
+
+    if (!owner_id || !/^[0-9a-f-]{36}$/i.test(owner_id)) {
+      return res.status(400).json({ error: 'owner_id es obligatorio y debe ser un UUID válido' });
+    }
+    if (!full_name || !entry_date) {
+      return res.status(400).json({ error: 'Faltan campos obligatorios: full_name, entry_date' });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(entry_date)) {
+      return res.status(400).json({ error: 'entry_date debe estar en formato YYYY-MM-DD' });
+    }
+
+    const ownerCheck = await query('SELECT id FROM users WHERE id = $1', [owner_id]);
+    if (ownerCheck.rowCount === 0) {
+      return res.status(400).json({ error: 'owner_id no corresponde a ningún usuario' });
+    }
+
+    const r = await query(
+      `INSERT INTO tenants
+        (full_name, dni, phone, email, emergency_contact, emergency_phone,
+         entry_date, monthly_rent, deposit, status, notes, owner_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11)
+       RETURNING id, full_name`,
+      [
+        full_name.trim(),
+        dni || null,
+        phone || null,
+        email || null,
+        emergency_contact || null,
+        emergency_phone || null,
+        entry_date,
+        Number(monthly_rent || 0),
+        Number(deposit || 0),
+        notes || null,
+        owner_id,
+      ]
+    );
+    console.log(`[form-intake] Nuevo inquilino: ${r.rows[0].full_name}`);
+    res.json({ ok: true, tenant: r.rows[0] });
+  } catch (err) {
+    console.error('[form-intake] Error:', err.message);
+    res.status(500).json({ error: 'Error al registrar inquilino' });
+  }
+});
 
 // ============================================================
 // A PARTIR DE AQUI TODAS LAS RUTAS REQUIEREN AUTENTICACION
